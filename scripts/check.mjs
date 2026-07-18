@@ -110,6 +110,30 @@ const conflicting = plugin.normalizeOverview({ providers: [
 assert.equal(conflicting.warning, null, "each service may have its own active account");
 assert.equal(conflicting.providers[0].accounts.filter((item) => item.active).length, 1, "each service must expose at most one active account");
 assert.equal(conflicting.providers[1].accounts.filter((item) => item.active).length, 1, "multiple services may each have an active account");
+const traySummary = plugin.buildTraySubmenu(plugin.normalizeOverview({
+  dapAccount: { providerId: "claude", accountId: "claude-dap" },
+  providers: [
+    { provider: "claude", accounts: [
+      { id: "claude-dap", dapActive: true, usage: [{ kind: "five-hour", usedPercent: 99 }] },
+      { id: "claude-active", active: true, usage: [{ kind: "five-hour", usedPercent: 9 }, { kind: "weekly", usedPercent: 22 }] },
+    ] },
+    { provider: "codex", activeAccountId: "codex-active", accounts: [
+      { id: "codex-active", usage: [{ kind: "five-hour", usedPercent: 25 }, { kind: "weekly", usedPercent: 61 }] },
+    ] },
+  ],
+}));
+assert.deepEqual(traySummary.filter((item) => item.actionId).map((item) => item.itemId), [
+  "codex-five-hour", "codex-weekly", "claude-five-hour", "claude-weekly", "details",
+]);
+assert.match(traySummary.find((item) => item.itemId === "codex-five-hour").label, /Codex · 5시간 25%/);
+assert.match(traySummary.find((item) => item.itemId === "claude-five-hour").label, /Claude · 5시간 9%/);
+assert.ok(!traySummary.find((item) => item.itemId === "claude-five-hour").label.includes("(DAP)"), "service-active account must win over DAP fallback");
+const dapFallback = plugin.buildTraySubmenu(plugin.normalizeOverview({ providers: [
+  { provider: "claude", dapActiveAccountId: "dap", accounts: [{ id: "dap", usage: [{ kind: "weekly", usedPercent: 33 }] }] },
+] }));
+assert.match(dapFallback.find((item) => item.itemId === "claude-weekly").label, /Claude \(DAP\) · 주간 33%/);
+assert.equal(dapFallback.find((item) => item.itemId === "claude-five-hour").enabled, false);
+assert.equal(plugin.buildTraySubmenu({ error: "조회 실패" })[0].enabled, false);
 for (const expected of ["＋ 다른 계정 연결", "account-trigger", "account-menu", 'role="menu"', 'role="menuitemradio"', 'role="menuitem"', "data-account-id", 'data-action="add"', "add-account", "open-account-settings", "DAP 계정 설정…", "five-hour", "weekly", 'class="metric"', 'role="group"']) assert.ok(html.includes(expected));
 for (const chip of ["chip current", "chip dap", "선택된 계정 상태", "회사 계정", "개인 계정"]) assert.ok(html.includes(chip));
 assert.ok(!html.includes("<select"), "native account selects must not be used");
@@ -141,6 +165,12 @@ let overviewCalls = 0;
 let addArg = null;
 let usageArgs = null;
 let settingsOpened = false;
+const trayUpdates = [];
+let clearedTimer = false;
+const originalSetInterval = globalThis.setInterval;
+const originalClearInterval = globalThis.clearInterval;
+globalThis.setInterval = (_callback, delay) => ({ delay, unref() {} });
+globalThis.clearInterval = (timer) => { clearedTimer = timer?.delay === 5 * 60 * 1000; };
 const fakePalette = {
   onMessage(handler) { messageHandler = handler; return () => {}; },
   postMessage(message) { posted.push(message); },
@@ -148,12 +178,17 @@ const fakePalette = {
 };
 const dispose = plugin.activate({
   actions: { registerAction(item) { registrations[item.id] = item.callback; } },
-  trayMenu: { addItem(item) { registrations.tray = item; } },
+  trayMenu: { addItem(item) { registrations.tray = item; return { update(patch) { trayUpdates.push(patch); } }; } },
   radialMenu: { addItem(item) { registrations.radial = item; } },
   host: {
     windows: { openPalette() { return fakePalette; } },
     aiAccounts: {
-      getUsageOverview() { overviewCalls += 1; return [{ provider: "claude", loggedIn: false }]; },
+      getUsageOverview() {
+        overviewCalls += 1;
+        return { providers: [{ provider: "claude", activeAccountId: "current", accounts: [
+          { id: "current", usage: [{ kind: "five-hour", usedPercent: 7 }, { kind: "weekly", usedPercent: 12 }] },
+        ] }] };
+      },
       addAccount(providerId) { addArg = providerId; return true; },
       getAccountUsage(providerId, accountId) { usageArgs = [providerId, accountId]; return { usage: [{ label: "주간", usedPercent: 12 }] }; },
     },
@@ -163,7 +198,10 @@ const dispose = plugin.activate({
 assert.ok(registrations["open-ai-usage"]);
 assert.equal(registrations.tray.actionId, "open-ai-usage");
 assert.equal(registrations.tray.showInContextMenu, true);
+assert.match(registrations.tray.submenu[0].label, /불러오는 중/);
 assert.equal(registrations.radial.actionId, "open-ai-usage");
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.ok(trayUpdates.some((patch) => patch.submenu.some((item) => item.itemId === "claude-five-hour" && item.actionId === "open-ai-usage")));
 registrations["open-ai-usage"]();
 await messageHandler({ type: "ready" });
 await new Promise((resolve) => setTimeout(resolve, 0));
@@ -184,7 +222,54 @@ messageHandler({ type: "open-account-settings" });
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(settingsOpened, true);
 dispose();
+assert.equal(clearedTimer, true, "deactivate must clear the five-minute tray refresh timer");
+globalThis.setInterval = originalSetInterval;
+globalThis.clearInterval = originalClearInterval;
+
+// A deactivated session may still have an in-flight CLI overview. Resolving it after immediate
+// reactivation must never overwrite the new registration's fresher submenu.
+let resolveOldOverview;
+const oldOverview = new Promise((resolve) => { resolveOldOverview = resolve; });
+const oldUpdates = [];
+const oldDispose = plugin.activate({
+  actions: { registerAction() {} },
+  trayMenu: { addItem() { return { update(patch) { oldUpdates.push(patch); } }; } },
+  radialMenu: { addItem() {} },
+  host: { aiAccounts: { getOverview() { return oldOverview; } } },
+});
+oldDispose();
+
+const newUpdates = [];
+const newDispose = plugin.activate({
+  actions: { registerAction() {} },
+  trayMenu: { addItem() { return { update(patch) { newUpdates.push(patch); } }; } },
+  radialMenu: { addItem() {} },
+  host: { aiAccounts: { getOverview() { return { providers: [{ provider: "codex", activeAccountId: "new", accounts: [
+    { id: "new", usage: [{ kind: "five-hour", usedPercent: 20 }] },
+  ] }] }; } } },
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.ok(newUpdates.some((patch) => patch.submenu.some((item) => /5시간 20%/.test(item.label || ""))), "new activation must publish 20% usage");
+resolveOldOverview({ providers: [{ provider: "codex", activeAccountId: "old", accounts: [
+  { id: "old", usage: [{ kind: "five-hour", usedPercent: 90 }] },
+] }] });
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.ok(!newUpdates.some((patch) => patch.submenu.some((item) => /5시간 90%/.test(item.label || ""))), "old activation must not overwrite the new tray registration");
+assert.equal(oldUpdates.length, 0, "deactivated registration must not receive the late result either");
+newDispose();
+
+// DAP 1.3.5 and older return no mutable tray handle. Activation must keep the legacy direct-click
+// contribution usable even though min_app_version normally prevents this install combination.
+let legacyTray;
+const legacyDispose = plugin.activate({
+  actions: { registerAction() {} },
+  trayMenu: { addItem(item) { legacyTray = item; } },
+  radialMenu: { addItem() {} },
+  host: { aiAccounts: { getOverview() { return { providers: [] }; } } },
+});
+assert.equal(legacyTray.actionId, "open-ai-usage");
+legacyDispose();
 
 const manifest = readFileSync(new URL("plugin.yaml", root), "utf8");
-for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.4", 'min_app_version: "1.3.4"', "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
+for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.6", 'min_app_version: "1.3.6"', "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
 console.log("ok manifest, plugin module, palette script, normalization, activation bridge");
