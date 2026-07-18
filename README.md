@@ -49,7 +49,7 @@ ctx.host.aiAccounts.openAccounts()
 ~/Library/Application Support/dap/plugins/io.github.o-min222.ai_usage/
 ```
 
-DAP을 재시작하거나 설정에서 플러그인을 다시 활성화합니다. manifest의 `window.palette` 권한을 승인해야 합니다.
+DAP을 재시작하거나 설정에서 플러그인을 다시 활성화합니다. manifest의 `window.palette`와 `ai.accounts` 권한을 승인해야 합니다. 현재 DAP는 `ai.accounts` capability를 아직 제공하지 않지만, permission 문자열은 향후 gated Host namespace를 받기 위해 미리 선언되어 있습니다.
 
 ## Development
 
@@ -67,7 +67,7 @@ node --check dap_ai_usage/plugin.mjs
 1. `plugin.yaml`과 `package.json` 버전을 함께 갱신합니다.
 2. `npm run check`를 실행합니다.
 3. public GitHub repository에 변경을 push합니다.
-4. 동일 버전 tag를 생성합니다. 예: `git tag v0.1.0 && git push --tags`.
+4. 동일 버전 tag를 생성합니다. 예: `git tag v0.1.1 && git push --tags`.
 5. `Project-Undonghae/dap-plugins`의 `plugin_catalog.json`에 다음 형태로 PR을 만듭니다.
 
 ```json
@@ -77,7 +77,7 @@ node --check dap_ai_usage/plugin.mjs
   "description": "로그인된 AI 서비스 계정의 구독 사용량과 초기화 시각을 확인",
   "category": "utility",
   "repo": "o-min222/dap-ai-usage",
-  "ref": "v0.1.0"
+  "ref": "v0.1.1"
 }
 ```
 

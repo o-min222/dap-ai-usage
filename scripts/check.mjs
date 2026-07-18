@@ -180,5 +180,5 @@ assert.equal(settingsOpened, true);
 dispose();
 
 const manifest = readFileSync(new URL("plugin.yaml", root), "utf8");
-for (const expected of ["id: io.github.o-min222.ai_usage", "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette"]) assert.ok(manifest.includes(expected));
+for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.1", "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
 console.log("ok manifest, plugin module, palette script, normalization, activation bridge");

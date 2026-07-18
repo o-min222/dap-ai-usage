@@ -1,6 +1,6 @@
 id: io.github.o-min222.ai_usage
 name: AI Usage
-version: 0.1.0
+version: 0.1.1
 manifest_version: 2
 entry: dap_ai_usage.plugin:activate
 description: 로그인된 Codex와 Claude 앱 계정의 구독 사용량과 초기화 시각을 카드로 확인합니다.
@@ -8,5 +8,6 @@ author: o-min222
 surface: user
 permissions:
   - window.palette
+  - ai.accounts
 execution_modes:
   - user
