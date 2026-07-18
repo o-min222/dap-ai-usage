@@ -110,11 +110,12 @@ const conflicting = plugin.normalizeOverview({ providers: [
 assert.equal(conflicting.warning, null, "each service may have its own active account");
 assert.equal(conflicting.providers[0].accounts.filter((item) => item.active).length, 1, "each service must expose at most one active account");
 assert.equal(conflicting.providers[1].accounts.filter((item) => item.active).length, 1, "multiple services may each have an active account");
-for (const expected of ["+ 새 계정 추가…", "<option disabled>──────────</option>", "__add__", 'data-action="add"', "add-account", "open-account-settings", "DAP 계정 설정…", "five-hour", "weekly", "usage-bottom", 'role="group"']) assert.ok(html.includes(expected));
+for (const expected of ["+ 새 계정 추가…", "<option disabled>──────────</option>", "__add__", 'data-action="add"', "add-account", "open-account-settings", "DAP 계정 설정…", "five-hour", "weekly", 'class="metric"', 'role="group"']) assert.ok(html.includes(expected));
 for (const chip of ["chip current", "chip dap", "선택된 계정 상태", "회사 계정", "개인 계정"]) assert.ok(html.includes(chip));
 assert.ok(!/accountOptions=.*a\.active\?/s.test(html), "select option text must not include active status");
-assert.match(html, /\.usage\{[^}]*border-top:/, "usage rows must start below a top divider");
-assert.match(html, /\.metric\+\.metric\{[^}]*border-top:/, "usage rows must have an inset divider");
+assert.match(html, /\.metric\{[^}]*display:grid[^}]*grid-template-columns:/, "each usage limit must stay on one compact row");
+assert.ok(!/\.usage\{[^}]*border(?:-top)?:/.test(html), "usage group must not add a horizontal divider");
+assert.ok(!/\.metric\+\.metric\{[^}]*border(?:-top)?:/.test(html), "usage rows must not add horizontal dividers");
 assert.ok(!/\.metric\{[^}]*(background|border-radius)/.test(html), "usage rows must not use nested metric boxes");
 assert.match(html, /card-head[^`]*account-select/s, "provider and account select must share the card header");
 assert.ok(!html.includes('type:"switch-account"'), "query account select must not mutate the active account");
@@ -180,5 +181,5 @@ assert.equal(settingsOpened, true);
 dispose();
 
 const manifest = readFileSync(new URL("plugin.yaml", root), "utf8");
-for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.1", "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
+for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.2", "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
 console.log("ok manifest, plugin module, palette script, normalization, activation bridge");
