@@ -5,11 +5,12 @@
 ![AI Usage dashboard](output/playwright/ai-usage-dashboard.png)
 
 > [!IMPORTANT]
-> DAP v1.3.4 이상에서 공식 `ctx.host.aiAccounts` capability를 지원합니다. 이전 DAP 버전에서는 대시보드가 `DAP 지원이 필요합니다`를 표시합니다. Host 계약은 [docs/HOST_INTEGRATION.md](docs/HOST_INTEGRATION.md)를 참고하세요.
+> DAP v1.3.6 이상에서 상단바 동적 사용량 메뉴와 Codex·Claude Code 구독 한도를 지원합니다. Host 계약은 [docs/HOST_INTEGRATION.md](docs/HOST_INTEGRATION.md)를 참고하세요.
 
 ## Features
 
 - DAP 트레이와 펫 래디얼 메뉴에서 420×620 dark palette 열기
+- macOS 상단바/트레이의 `AI Usage` submenu에서 활성 Codex·Claude의 5시간·주간 사용량을 바로 확인하고 상세 palette 열기
 - 서비스별 카드와 연결 계정 선택
 - 5시간·주간 사용량, 진행률, 초기화 시각 표시
 - 서비스 활성, DAP 사용, 회사·개인 계정 상태 chip
@@ -43,7 +44,7 @@ ctx.host.aiAccounts.openAccounts()
 
 ## Install
 
-DAP v1.3.4 이상에서 저장소 전체를 아래 폴더로 복사합니다.
+DAP v1.3.6 이상에서 저장소 전체를 아래 폴더로 복사합니다.
 
 ```text
 ~/Library/Application Support/dap/plugins/io.github.o-min222.ai_usage/
@@ -67,7 +68,7 @@ node --check dap_ai_usage/plugin.mjs
 1. `plugin.yaml`과 `package.json` 버전을 함께 갱신합니다.
 2. `npm run check`를 실행합니다.
 3. public GitHub repository에 변경을 push합니다.
-4. 동일 버전 tag를 생성합니다. 예: `git tag v0.1.4 && git push --tags`.
+4. 동일 버전 tag를 생성합니다. 예: `git tag v0.1.6 && git push --tags`.
 5. `Project-Undonghae/dap-plugins`의 `plugin_catalog.json`에 다음 형태로 PR을 만듭니다.
 
 ```json
@@ -77,11 +78,11 @@ node --check dap_ai_usage/plugin.mjs
   "description": "로그인된 AI 서비스 계정의 구독 사용량과 초기화 시각을 확인",
   "category": "utility",
   "repo": "o-min222/dap-ai-usage",
-  "ref": "v0.1.4"
+  "ref": "v0.1.6"
 }
 ```
 
-Catalog `id`는 `plugin.yaml`과 정확히 같아야 합니다. 이 릴리스의 최소 지원 앱 버전은 `plugin.yaml`의 `min_app_version: "1.3.4"`입니다.
+Catalog `id`는 `plugin.yaml`과 정확히 같아야 합니다. 이 릴리스의 최소 지원 앱 버전은 `plugin.yaml`의 `min_app_version: "1.3.6"`입니다.
 
 ## License
 

@@ -1,4 +1,5 @@
 const PALETTE_PAGE = "palette/index.html";
+const TRAY_REFRESH_MS = 5 * 60 * 1000;
 const PROVIDER_NAMES = {
   openai: "ChatGPT / Codex",
   chatgpt: "ChatGPT",
@@ -12,6 +13,11 @@ const PROVIDER_NAMES = {
 
 let palette = null;
 let disposeMessages = null;
+let trayRegistration = null;
+let trayRefreshTimer = null;
+let overviewRequest = null;
+let overviewRequestGeneration = 0;
+let activationGeneration = 0;
 
 function text(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -232,72 +238,165 @@ async function loadOverview(ctx) {
   }
 }
 
-function post(message) {
+function activeUsageSource(provider) {
+  if (!provider) return null;
+  if (provider.accounts.length) {
+    const account = provider.accounts.find((item) => item.active) || provider.accounts.find((item) => item.dapActive);
+    return account ? { ...account, usage: mergeUsageSlots(account.usage, provider.usage) } : null;
+  }
+  return provider.active || provider.dapActive ? provider : null;
+}
+
+function resetLabel(item) {
+  if (!item?.resetAt) return "";
+  const date = new Date(item.resetAt);
+  if (Number.isNaN(date.getTime())) return "";
+  const options = item.kind === "weekly"
+    ? { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    : { hour: "2-digit", minute: "2-digit" };
+  return ` · ${new Intl.DateTimeFormat("ko-KR", options).format(date)} 초기화`;
+}
+
+function percentLabel(value) {
+  return value === null || value === undefined ? "—" : `${Number(value.toFixed(1))}%`;
+}
+
+/** Build a bounded, declarative tray submenu from sanitized overview metadata. */
+export function buildTraySubmenu(overview) {
+  if (overview?.error || overview?.unsupported) {
+    return [
+      { itemId: "error", label: text(overview.error) || text(overview.message, "사용량을 불러오지 못했습니다."), enabled: false },
+      { itemId: "separator", type: "separator" },
+      { itemId: "details", label: "상세 패널 열기…", actionId: "open-ai-usage", enabled: true },
+    ];
+  }
+  const rows = [];
+  for (const providerKey of ["codex", "claude"]) {
+    const provider = overview?.providers?.find((item) => item.id.toLowerCase() === providerKey);
+    const account = activeUsageSource(provider);
+    if (!provider || !account) continue;
+    const dap = account.dapActive === true || provider.dapActive === true;
+    const prefix = `${provider.name}${dap ? " (DAP)" : ""}`;
+    for (const [kind, windowLabel] of [["five-hour", "5시간"], ["weekly", "주간"]]) {
+      const usage = account.usage.find((item) => item.kind === kind);
+      rows.push(usage ? {
+        itemId: `${providerKey}-${kind}`,
+        label: `${prefix} · ${windowLabel} ${percentLabel(usage.usedPercent)}${resetLabel(usage)}`,
+        actionId: "open-ai-usage",
+        enabled: true,
+      } : {
+        itemId: `${providerKey}-${kind}`,
+        label: `${prefix} · ${windowLabel} —`,
+        enabled: false,
+      });
+    }
+  }
+  if (!rows.length) rows.push({ itemId: "empty", label: "활성 Codex/Claude 계정이 없습니다.", enabled: false });
+  return [
+    ...rows,
+    { itemId: "separator", type: "separator" },
+    { itemId: "details", label: "상세 패널 열기…", actionId: "open-ai-usage", enabled: true },
+  ];
+}
+
+function updateTray(overview, generation) {
+  if (generation !== activationGeneration) return;
+  if (typeof trayRegistration?.update === "function") trayRegistration.update({ submenu: buildTraySubmenu(overview) });
+}
+
+async function requestOverview(ctx, fresh = false, generation = activationGeneration) {
+  if (generation !== activationGeneration) return unsupportedOverview("플러그인 세션이 종료되었습니다.");
+  // Account-add/manual palette refreshes must not reuse a request that started before the change.
+  if (fresh && overviewRequest && overviewRequestGeneration === generation) await overviewRequest;
+  if (generation !== activationGeneration) return unsupportedOverview("플러그인 세션이 종료되었습니다.");
+  if (!overviewRequest || overviewRequestGeneration !== generation) {
+    const request = loadOverview(ctx);
+    const tracked = request.finally(() => {
+      if (overviewRequest === tracked) {
+        overviewRequest = null;
+        overviewRequestGeneration = 0;
+      }
+    });
+    overviewRequest = tracked;
+    overviewRequestGeneration = generation;
+  }
+  return overviewRequest;
+}
+
+async function refreshTraySummary(ctx, fresh = false, generation = activationGeneration) {
+  const overview = await requestOverview(ctx, fresh, generation);
+  updateTray(overview, generation);
+  return overview;
+}
+
+function post(message, generation) {
+  if (generation !== activationGeneration) return;
   if (palette && typeof palette.postMessage === "function") palette.postMessage(message);
 }
 
-async function refresh(ctx) {
-  post({ type: "loading" });
-  post({ type: "overview", ...(await loadOverview(ctx)) });
+async function refresh(ctx, generation) {
+  post({ type: "loading" }, generation);
+  post({ type: "overview", ...(await refreshTraySummary(ctx, true, generation)) }, generation);
 }
 
-async function requestAccountUsage(ctx, message) {
+async function requestAccountUsage(ctx, message, generation) {
   const providerIdValue = text(message?.providerId);
   const accountId = text(message?.accountId);
   const accountHost = accountCapability(ctx);
   if (!providerIdValue || !accountId || typeof accountHost?.getAccountUsage !== "function") return;
   try {
     const raw = await accountHost.getAccountUsage(providerIdValue, accountId);
-    post({ type: "account-usage", requestId: message?.requestId, providerId: providerIdValue, accountId, usage: usageWindows({ usage: raw?.usage ?? raw?.limits ?? raw }) });
+    post({ type: "account-usage", requestId: message?.requestId, providerId: providerIdValue, accountId, usage: usageWindows({ usage: raw?.usage ?? raw?.limits ?? raw }) }, generation);
   } catch (error) {
-    post({ type: "account-usage", requestId: message?.requestId, providerId: providerIdValue, accountId, error: text(error?.message, "사용량을 조회하지 못했습니다.") });
+    post({ type: "account-usage", requestId: message?.requestId, providerId: providerIdValue, accountId, error: text(error?.message, "사용량을 조회하지 못했습니다.") }, generation);
   }
 }
 
-async function requestAddAccount(ctx, message) {
+async function requestAddAccount(ctx, message, generation) {
   const providerIdValue = text(message?.providerId);
   const accountHost = accountCapability(ctx);
   const method = ["addAccount", "connectAccount", "loginAccount"].find((name) => typeof accountHost?.[name] === "function");
   if (!providerIdValue || !method) {
-    post({ type: "add-result", providerId: providerIdValue, ok: false, message: "이 DAP 버전은 계정 추가를 지원하지 않습니다." });
+    post({ type: "add-result", providerId: providerIdValue, ok: false, message: "이 DAP 버전은 계정 추가를 지원하지 않습니다." }, generation);
     return;
   }
   try {
     const result = await accountHost[method](providerIdValue);
     if (result === false || result?.ok === false) throw new Error(text(result?.message, "계정 추가가 취소되었습니다."));
-    post({ type: "add-result", providerId: providerIdValue, ok: true, message: "계정 추가를 완료했습니다." });
+    post({ type: "add-result", providerId: providerIdValue, ok: true, message: "계정 추가를 완료했습니다." }, generation);
   } catch (error) {
-    post({ type: "add-result", providerId: providerIdValue, ok: false, message: text(error?.message, "계정을 추가하지 못했습니다.") });
+    post({ type: "add-result", providerId: providerIdValue, ok: false, message: text(error?.message, "계정을 추가하지 못했습니다.") }, generation);
   }
-  await refresh(ctx);
+  await refresh(ctx, generation);
 }
 
-async function openAccountSettings(ctx) {
+async function openAccountSettings(ctx, generation) {
   const targets = [accountCapability(ctx), ctx?.host?.settings];
   for (const target of targets) {
     const method = ["openAccounts", "openSettings", "open"].find((name) => typeof target?.[name] === "function");
     if (!method) continue;
     try {
       await target[method]("accounts");
-      post({ type: "settings-result", ok: true, message: "DAP 계정 설정을 열었습니다." });
+      post({ type: "settings-result", ok: true, message: "DAP 계정 설정을 열었습니다." }, generation);
       return;
     } catch (error) {
-      post({ type: "settings-result", ok: false, message: text(error?.message, "계정 설정을 열지 못했습니다.") });
+      post({ type: "settings-result", ok: false, message: text(error?.message, "계정 설정을 열지 못했습니다.") }, generation);
       return;
     }
   }
-  post({ type: "settings-result", ok: false, message: "이 DAP 버전은 계정 설정 열기를 지원하지 않습니다." });
+  post({ type: "settings-result", ok: false, message: "이 DAP 버전은 계정 설정 열기를 지원하지 않습니다." }, generation);
 }
 
 function alive(handle) {
   return Boolean(handle) && !(typeof handle.isDestroyed === "function" && handle.isDestroyed());
 }
 
-function openPalette(ctx) {
+function openPalette(ctx, generation) {
+  if (generation !== activationGeneration) return;
   if (alive(palette)) {
     if (typeof palette.show === "function") palette.show();
     if (typeof palette.focus === "function") palette.focus();
-    refresh(ctx);
+    refresh(ctx, generation);
     return;
   }
   const windows = ctx?.host?.windows;
@@ -317,27 +416,47 @@ function openPalette(ctx) {
   if (palette && typeof palette.onMessage === "function") {
     disposeMessages = palette.onMessage((message) => {
       if (!message || typeof message !== "object") return;
-      if (message.type === "ready" || message.type === "refresh") refresh(ctx);
-      else if (message.type === "query-account-usage") requestAccountUsage(ctx, message);
-      else if (message.type === "add-account") requestAddAccount(ctx, message);
-      else if (message.type === "open-account-settings") openAccountSettings(ctx);
+      if (message.type === "ready" || message.type === "refresh") refresh(ctx, generation);
+      else if (message.type === "query-account-usage") requestAccountUsage(ctx, message, generation);
+      else if (message.type === "add-account") requestAddAccount(ctx, message, generation);
+      else if (message.type === "open-account-settings") openAccountSettings(ctx, generation);
     });
   }
   if (typeof palette?.show === "function") palette.show();
 }
 
 export function activate(ctx) {
-  ctx.actions.registerAction({ id: "open-ai-usage", callback: () => openPalette(ctx) });
-  ctx.trayMenu.addItem({
+  const generation = ++activationGeneration;
+  ctx.actions.registerAction({ id: "open-ai-usage", callback: () => openPalette(ctx, generation) });
+  const registration = ctx.trayMenu.addItem({
     itemId: "ai-usage",
     label: "AI 계정 사용량",
     actionId: "open-ai-usage",
     showInContextMenu: true,
     priority: 60,
+    submenu: [
+      { itemId: "loading", label: "사용량 불러오는 중…", enabled: false },
+      { itemId: "separator", type: "separator" },
+      { itemId: "details", label: "상세 패널 열기…", actionId: "open-ai-usage", enabled: true },
+    ],
   });
+  trayRegistration = registration;
   ctx.radialMenu.addItem({ itemId: "ai-usage", label: "AI 사용량", actionId: "open-ai-usage", priority: 60 });
+  void refreshTraySummary(ctx, false, generation);
+  const refreshTimer = setInterval(() => void refreshTraySummary(ctx, false, generation), TRAY_REFRESH_MS);
+  trayRefreshTimer = refreshTimer;
+  if (typeof refreshTimer?.unref === "function") refreshTimer.unref();
 
   return () => {
+    clearInterval(refreshTimer);
+    if (generation !== activationGeneration) return;
+    activationGeneration += 1;
+    trayRefreshTimer = null;
+    trayRegistration = null;
+    if (overviewRequestGeneration === generation) {
+      overviewRequest = null;
+      overviewRequestGeneration = 0;
+    }
     if (typeof disposeMessages === "function") disposeMessages();
     disposeMessages = null;
     if (alive(palette) && typeof palette.close === "function") palette.close();
