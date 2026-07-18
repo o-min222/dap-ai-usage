@@ -7,7 +7,7 @@ const root = new URL("../", import.meta.url);
 const plugin = await import(fileURLToPath(new URL("dap_ai_usage/plugin.mjs", root)));
 const pluginSource = readFileSync(new URL("dap_ai_usage/plugin.mjs", root), "utf8");
 const html = readFileSync(new URL("palette/index.html", root), "utf8");
-for (const requiredFile of ["README.md", "LICENSE", "NOTICE.md", "docs/HOST_INTEGRATION.md", "output/playwright/ai-usage-dashboard.png"]) {
+for (const requiredFile of ["README.md", "LICENSE", "NOTICE.md", "docs/HOST_INTEGRATION.md", "output/playwright/ai-usage-dashboard.png", "output/playwright/ai-usage-account-menu.png"]) {
   assert.ok(readFileSync(new URL(requiredFile, root)).length > 100, `${requiredFile} must be included in the release`);
 }
 for (const icon of ["assets/codex.png", "assets/claude.png"]) {
@@ -110,20 +110,25 @@ const conflicting = plugin.normalizeOverview({ providers: [
 assert.equal(conflicting.warning, null, "each service may have its own active account");
 assert.equal(conflicting.providers[0].accounts.filter((item) => item.active).length, 1, "each service must expose at most one active account");
 assert.equal(conflicting.providers[1].accounts.filter((item) => item.active).length, 1, "multiple services may each have an active account");
-for (const expected of ["+ 새 계정 추가…", "<option disabled>──────────</option>", "__add__", 'data-action="add"', "add-account", "open-account-settings", "DAP 계정 설정…", "five-hour", "weekly", 'class="metric"', 'role="group"']) assert.ok(html.includes(expected));
+for (const expected of ["＋ 다른 계정 연결", "account-trigger", "account-menu", 'role="menu"', 'role="menuitemradio"', 'role="menuitem"', "data-account-id", 'data-action="add"', "add-account", "open-account-settings", "DAP 계정 설정…", "five-hour", "weekly", 'class="metric"', 'role="group"']) assert.ok(html.includes(expected));
 for (const chip of ["chip current", "chip dap", "선택된 계정 상태", "회사 계정", "개인 계정"]) assert.ok(html.includes(chip));
-assert.ok(!/accountOptions=.*a\.active\?/s.test(html), "select option text must not include active status");
+assert.ok(!html.includes("<select"), "native account selects must not be used");
 assert.match(html, /\.metric\{[^}]*display:grid[^}]*grid-template-columns:/, "each usage limit must stay on one compact row");
 assert.ok(!/\.usage\{[^}]*border(?:-top)?:/.test(html), "usage group must not add a horizontal divider");
 assert.ok(!/\.metric\+\.metric\{[^}]*border(?:-top)?:/.test(html), "usage rows must not add horizontal dividers");
 assert.ok(!/\.metric\{[^}]*(background|border-radius)/.test(html), "usage rows must not use nested metric boxes");
-assert.match(html, /card-head[^`]*account-select/s, "provider and account select must share the card header");
+assert.match(html, /card-head[^`]*account-picker/s, "provider and custom account picker must share the card header");
 assert.ok(!html.includes('type:"switch-account"'), "query account select must not mutate the active account");
-assert.ok(!html.includes('class="add-account"'), "account add must be a select option, not a separate button");
+assert.match(html, /account-menu[^`]*account-add/s, "account add must stay inside the account menu");
+assert.ok(html.includes('aria-label="${attr(`${provider.name} 계정, ${selectedName}`)}"'), "account trigger must identify its provider and selected account");
+for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) assert.ok(html.includes(`"${key}"`), `account menu must support ${key}`);
+assert.ok(html.includes('tabindex="-1" data-account-id'), "account choices must use roving programmatic focus");
+assert.ok(html.includes('if(event.key==="Tab"){closeMenus();return}'), "Tab must close an open account menu");
 assert.ok(!html.includes('class="active-account"'), "header must not duplicate active account information");
 assert.ok(html.includes("message.requestId!==provider._requestId"), "stale usage responses must not replace current metrics");
 assert.ok(html.includes("provider._requestId=++usageRequestSequence"), "request ids must remain monotonic across overview refreshes");
-assert.ok(html.includes('select.selectedOptions[0]?.dataset.action==="add"'), "add action must not depend on a collision-prone account id sentinel");
+assert.ok(html.includes("pendingAdds.set(provider.id"), "adding an account must remember the previous account ids");
+assert.ok(html.includes("provider._selectedId=added.accountId||added.id"), "a newly discovered account must become the viewed account");
 assert.ok(pluginSource.includes("requestId: message?.requestId"), "host bridge must echo the usage request id");
 for (const forbidden of ["setActiveAccount", "setDapAccount", "setActiveProfile", "switchAccount", "selectAccount"]) {
   assert.ok(!pluginSource.includes(forbidden), `${forbidden} must not be called by this read-only dashboard`);
@@ -181,5 +186,5 @@ assert.equal(settingsOpened, true);
 dispose();
 
 const manifest = readFileSync(new URL("plugin.yaml", root), "utf8");
-for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.2", "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
+for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.3", "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
 console.log("ok manifest, plugin module, palette script, normalization, activation bridge");
