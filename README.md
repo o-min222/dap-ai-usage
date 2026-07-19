@@ -26,7 +26,7 @@
 - API 키, API 조직 비용 또는 개발자 API token usage를 읽지 않습니다.
 - 브라우저 cookie, 인증 token, Keychain 또는 CLI credential을 직접 읽지 않습니다.
 - 자식 프로세스를 실행하거나 로그인 세션을 복제하지 않습니다.
-- 계정 label, 상태, 사용량, reset 시각 등 DAP Host가 제공한 metadata만 palette로 전달합니다.
+- 계정 label, 상태, 사용량, reset 시각과 Host가 허용한 두 사용량 행만 palette로 전달합니다.
 - credential과 공식 CLI 로그인 세션의 소유권은 항상 DAP Host에 있습니다.
 
 ## Preview / Host dependency
@@ -40,7 +40,7 @@ ctx.host.aiAccounts.addAccount(providerId)
 ctx.host.aiAccounts.openAccounts()
 ```
 
-`getAccountUsage`는 선택 기능입니다. 없으면 overview에 포함된 계정별 사용량을 사용합니다. 전체 schema와 DAP 앱 변경 지점은 [Host integration guide](docs/HOST_INTEGRATION.md)에 있습니다.
+`getAccountUsage`는 선택 기능입니다. 없으면 overview에 포함된 계정별 사용량을 사용합니다. 구조화된 `usage`가 비어 있으면 선택적인 `usageLines`를 fallback으로 파싱합니다. 전체 schema와 DAP 앱 변경 지점은 [Host integration guide](docs/HOST_INTEGRATION.md)에 있습니다.
 
 ## Install
 
@@ -68,7 +68,7 @@ node --check dap_ai_usage/plugin.mjs
 1. `plugin.yaml`과 `package.json` 버전을 함께 갱신합니다.
 2. `npm run check`를 실행합니다.
 3. public GitHub repository에 변경을 push합니다.
-4. 동일 버전 tag를 생성합니다. 예: `git tag v0.1.6 && git push --tags`.
+4. 동일 버전 tag를 생성합니다. 예: `git tag v0.1.7 && git push --tags`.
 5. `Project-Undonghae/dap-plugins`의 `plugin_catalog.json`에 다음 형태로 PR을 만듭니다.
 
 ```json
@@ -78,7 +78,7 @@ node --check dap_ai_usage/plugin.mjs
   "description": "로그인된 AI 서비스 계정의 구독 사용량과 초기화 시각을 확인",
   "category": "utility",
   "repo": "o-min222/dap-ai-usage",
-  "ref": "v0.1.6"
+  "ref": "v0.1.7"
 }
 ```
 

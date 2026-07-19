@@ -44,6 +44,35 @@ function providerId(raw, index) {
   return text(raw?.providerId) || text(raw?.provider) || text(raw?.id) || `provider-${index + 1}`;
 }
 
+function usageLineWindows(raw) {
+  const lines = Array.isArray(raw?.usageLines) ? raw.usageLines : [];
+  const windows = [];
+  const seen = new Set();
+  for (const rawLine of lines.slice(0, 2)) {
+    const line = text(rawLine).replace(/[\u0000-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 512);
+    const kind = /^Current session:/i.test(line) ? "five-hour"
+      : /^Current week \(all models\):/i.test(line) ? "weekly" : null;
+    if (!kind || seen.has(kind)) continue;
+    const percent = line.match(/(\d+(?:\.\d+)?)\s*(?:%|percent)\s*used\b/i);
+    const usedPercent = clampPercent(percent?.[1]);
+    if (usedPercent === null) continue;
+    const reset = line.match(/\breset(?:s|ting)?\s+(.+)$/i);
+    seen.add(kind);
+    windows.push({
+      id: `usage-line-${kind}`,
+      label: kind === "five-hour" ? "5시간 한도" : "주간 한도",
+      kind,
+      usedPercent,
+      used: null,
+      limit: null,
+      unit: "",
+      resetAt: null,
+      detail: reset ? `초기화 ${reset[1]}` : "",
+    });
+  }
+  return windows;
+}
+
 function usageWindows(raw) {
   const values = Array.isArray(raw?.usage) ? raw.usage
     : Array.isArray(raw?.limits) ? raw.limits
@@ -65,7 +94,10 @@ function usageWindows(raw) {
           : /주간|\bweekly\b|\bweek\b|7\s*[-–—_]?\s*(?:일|days?\b)/.test(classification) ? "weekly" : null;
     return { id: text(item?.id, `usage-${index + 1}`), label, kind, usedPercent, used: explicitUsed, limit: explicitLimit, unit: text(item?.unit), resetAt: isoDate(item?.resetAt ?? item?.resetsAt ?? item?.resetTime), detail: text(item?.detail) || text(item?.description) };
   });
-  return [normalized.find((item) => item.kind === "five-hour"), normalized.find((item) => item.kind === "weekly")].filter(Boolean);
+  const fallback = usageLineWindows(raw);
+  return ["five-hour", "weekly"].map((kind) => (
+    normalized.find((item) => item.kind === kind) || fallback.find((item) => item.kind === kind)
+  )).filter(Boolean);
 }
 
 function mergeUsageSlots(primary, fallback) {
@@ -346,7 +378,8 @@ async function requestAccountUsage(ctx, message, generation) {
   if (!providerIdValue || !accountId || typeof accountHost?.getAccountUsage !== "function") return;
   try {
     const raw = await accountHost.getAccountUsage(providerIdValue, accountId);
-    post({ type: "account-usage", requestId: message?.requestId, providerId: providerIdValue, accountId, usage: usageWindows({ usage: raw?.usage ?? raw?.limits ?? raw }) }, generation);
+    const usagePayload = Array.isArray(raw) ? { usage: raw } : raw;
+    post({ type: "account-usage", requestId: message?.requestId, providerId: providerIdValue, accountId, usage: usageWindows(usagePayload) }, generation);
   } catch (error) {
     post({ type: "account-usage", requestId: message?.requestId, providerId: providerIdValue, accountId, error: text(error?.message, "사용량을 조회하지 못했습니다.") }, generation);
   }

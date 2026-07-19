@@ -1,10 +1,9 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
 const root = new URL("../", import.meta.url);
-const plugin = await import(fileURLToPath(new URL("dap_ai_usage/plugin.mjs", root)));
+const plugin = await import(new URL("dap_ai_usage/plugin.mjs", root));
 const pluginSource = readFileSync(new URL("dap_ai_usage/plugin.mjs", root), "utf8");
 const html = readFileSync(new URL("palette/index.html", root), "utf8");
 for (const requiredFile of ["README.md", "LICENSE", "NOTICE.md", "docs/HOST_INTEGRATION.md", "output/playwright/ai-usage-dashboard.png", "output/playwright/ai-usage-account-menu.png"]) {
@@ -41,6 +40,17 @@ assert.deepEqual(plugin.normalizeProvider({ usage: [
   { label: "rolling limit", kind: "5-hour", usedPercent: 4 },
   { label: "7-day limit", usedPercent: 3 },
 ] }).usage.map((item)=>item.kind), ["five-hour", "weekly"]);
+const usageLineFallback = plugin.normalizeProvider({ provider: "claude", usage: [], usageLines: [
+  "Current session: 9 percent used · resets Jul 19, 6:10pm (Etc/GMT-9)",
+  "Current week (all models): 22% used · resets Jul 21, 7pm (Etc/GMT-9)",
+] });
+assert.deepEqual(usageLineFallback.usage.map((item) => item.usedPercent), [9, 22]);
+assert.match(usageLineFallback.usage[0].detail, /Jul 19/);
+const structuredUsageWins = plugin.normalizeProvider({ usage: [{ kind: "five-hour", label: "5시간", usedPercent: 7 }], usageLines: [
+  "Current session: 99% used · resets later",
+  "Current week (all models): 33% used · resets later",
+] });
+assert.deepEqual(structuredUsageWins.usage.map((item) => item.usedPercent), [7, 33]);
 const accountUsage = plugin.normalizeProvider({ accounts: [{ id: "work", email: "work@example.com", usage: [{ label: "주간", usedPercent: 61 }] }] });
 assert.equal(accountUsage.accounts[0].email, "work@example.com");
 assert.equal(accountUsage.accounts[0].usage[0].usedPercent, 61);
@@ -271,5 +281,5 @@ assert.equal(legacyTray.actionId, "open-ai-usage");
 legacyDispose();
 
 const manifest = readFileSync(new URL("plugin.yaml", root), "utf8");
-for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.6", 'min_app_version: "1.3.6"', "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
+for (const expected of ["id: io.github.o-min222.ai_usage", "version: 0.1.7", 'min_app_version: "1.3.6"', "manifest_version: 2", "entry: dap_ai_usage.plugin:activate", "- window.palette", "- ai.accounts"]) assert.ok(manifest.includes(expected));
 console.log("ok manifest, plugin module, palette script, normalization, activation bridge");
